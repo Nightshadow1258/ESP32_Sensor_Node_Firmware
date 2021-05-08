@@ -32,13 +32,13 @@ Adafruit_BME280 bme;
 #endif
 
 /*Put your SSID & Password*/
-#define WIFI_SSID "Linksys"
-#define WIFI_PASS "!waRiN#3004"
+#define WIFI_SSID "WIFI_SSID"
+#define WIFI_PASS "WIFI_PASSWORD"
 
-#define mqtt_server "192.168.1.3"
+#define mqtt_server "MQTT_SERVER_IP"
 #define mqtt_port 1883
-#define mqtt_user "paul"
-#define mqtt_password "!waRiN#3004"
+#define mqtt_user "MQTT_USERNAME"
+#define mqtt_password "MQTT_PASSWORD"
 
 WiFiClient espClient;
 PubSubClient client(espClient);
