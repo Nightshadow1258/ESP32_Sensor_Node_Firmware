@@ -2,11 +2,13 @@
 // Settings
 // -----------------------------------------------------------------------------
 
-#define SLEEP 1
-#define BME_connected 1
+#define SLEEP 0
+#define BME_connected 0
 #define Doorsensor_connected 1
 #define Battery_powered 1
-
+#define HDC1080_connected 1
+#define LED_connected 0
+#define MQTT 1
 // -----------------------------------------------------------------------------
 // Libraries
 // -----------------------------------------------------------------------------
@@ -18,6 +20,7 @@
 #include <Adafruit_BME280.h>
 #include <PubSubClient.h>
 #include <Adafruit_NeoPixel.h>
+#include "ClosedCube_HDC1080.h"
 
 // -----------------------------------------------------------------------------
 // Variables
@@ -29,16 +32,18 @@ int light;
 #define BME280_ADDRESS  (0x76) //0x76 for violett PCB | 0x77 for blue PCB!!
 Adafruit_BME280 bme;
 #define BME_Power_Pin 32
+float Hum_offset = 5.5;  //Node 2 
 #endif
 
 /*Put your SSID & Password*/
-#define WIFI_SSID "WIFI_SSID"
-#define WIFI_PASS "WIFI_PASSWORD"
+#define WIFI_SSID "Linksys"
+#define WIFI_PASS "!waRiN#3004"
 
-#define mqtt_server "MQTT_SERVER_IP"
+#define mqtt_server "192.168.1.3"
 #define mqtt_port 1883
-#define mqtt_user "MQTT_USERNAME"
-#define mqtt_password "MQTT_PASSWORD"
+#define mqtt_user "paul"
+#define mqtt_password "!waRiN#3004"
+#define mqtt_client_id "Node2"
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -52,12 +57,12 @@ Node 4 → Badezimmer
 Node 6 → Terrasse
 */
 
-#if BME_connected
-#define humidity_topic "/home/sensors/hum/node1"
-#define temperature_topic "/home/sensors/temp/node1"
-#define pressure_topic "/home/sensors/pres/node1"
-#define battery_topic "/home/sensors/bat/node1"
-#define altitude_topic "/home/sensors/alt/node1"
+#if MQTT
+#define humidity_topic "/home/sensors/hum/node2"
+#define temperature_topic "/home/sensors/temp/node2"
+#define pressure_topic "/home/sensors/pres/node2"
+#define battery_topic "/home/sensors/bat/node2"
+#define altitude_topic "/home/sensors/alt/node2"
 #endif
 
 
@@ -71,13 +76,13 @@ RTC_DATA_ATTR int bootCount = 0;
 
 
 #if Doorsensor_connected
-const int Doorsensorpin = 4;
+const int Doorsensorpin = 16;
 int Doorstate; // 0 close - 1 open wwitch
-#define doorsensor_topic "/home/sensors/door/node1"
+#define doorsensor_topic "/home/sensors/door/node2"
 #endif
   
 //light sensor
-#define lightpin 34
+#define lightpin 12
 //#define lightpindigital 25
 
 //motion sensor
@@ -85,9 +90,16 @@ int Doorstate; // 0 close - 1 open wwitch
 
 #if Battery_powered
 //Battery pin
-#define batpin 2
+#define batpin 33
 float batvolt=0;
 #endif
+
+#define GPIO_DONE 04
+
+#if HDC1080_connected
+ClosedCube_HDC1080 hdc1080;
+#endif
+
 // -----------------------------------------------------------------------------
 // Functions
 // -----------------------------------------------------------------------------
@@ -122,17 +134,23 @@ float mapf(float x, float in_min, float in_max, float out_min, float out_max)
 void readsensordata(){
 
 #if BME_connected
-  bme.begin(0x76);   //initalize Sensor communication
+  bme.begin(BME280_ADDRESS);   //initalize Sensor communication
   pressure = bme.readPressure() / 100.0F;
   temperature = bme.readTemperature();
   altitude = bme.readAltitude(SEALEVELPRESSURE_HPA);
-  humidity = bme.readHumidity();
+  humidity = bme.readHumidity() + Hum_offset;
 #endif
-  light = map(analogRead(lightpin),0,4095,100,0);
+
+#if HDC1080_connected
+  temperature = hdc1080.readTemperature();
+	humidity = hdc1080.readHumidity();
+#endif
+
+//light = map(analogRead(lightpin),0,4095,100,0);
 
 #if Battery_powered
   batvolt = analogRead(batpin);
-  Serial.println(batvolt);
+  Serial.println(batvolt);  
   batvolt = mapf(batvolt, 0.0, 4095, 0.0, 4.2); //Prozent angabe zwischen 3V und 4.2V
 #endif
 
@@ -159,6 +177,14 @@ void printsensordata(){
     Serial.println(" %");
 #endif
 
+#if HDC1080_connected
+  Serial.print("Temperature = ");
+  Serial.print(temperature);
+  Serial.println(" *C");
+  Serial.print("Humidity = ");
+  Serial.print(humidity);
+  Serial.println(" %");
+#endif
 
 #if Battery_powered
     Serial.print("Batteryvoltage = ");
@@ -171,12 +197,17 @@ void printsensordata(){
 
 void pushtopics(){
   
-  client.connect(mqtt_server, mqtt_user, mqtt_password);
+  if(client.connect(mqtt_client_id, mqtt_user, mqtt_password)==true){
   #if BME_connected
   client.publish(temperature_topic, String(temperature).c_str(), true);
   client.publish(humidity_topic, String(humidity).c_str(), true);
   client.publish(altitude_topic, String(altitude).c_str(), true);
   client.publish(pressure_topic, String(pressure).c_str(), true);
+  #endif
+
+  #if HDC1080_connected
+  client.publish(temperature_topic, String(temperature).c_str(), true);
+  client.publish(humidity_topic, String(humidity).c_str(), true);
   #endif
 
   #if Doorsensor_connected
@@ -186,6 +217,11 @@ void pushtopics(){
   client.publish(battery_topic, String(batvolt).c_str(), true);
   #endif
   delay(50);
+  Serial.print("MQTT Messages sent!");
+  }
+  else{
+  Serial.print("MQTT Messages NOT sent!");
+  }
   }
 
 
@@ -210,16 +246,31 @@ void callback(char* topic, byte* message, unsigned int length) {
 
 }
 
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    // Attempt to connect
+    if (client.connect(mqtt_client_id, mqtt_user, mqtt_password)) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+  }
+}
 
 #if Doorsensor_connected
-
 void DoorSensor(){
 Doorstate = digitalRead(Doorsensorpin);
   if (Doorstate == HIGH){
-      Serial.println("State HIGH");
+      Serial.println("Doorsensorpin HIGH");
     }
     else{
-      Serial.println("State LOW");
+      Serial.println("Doorsensorpin LOW");
     }
 }
 #endif
